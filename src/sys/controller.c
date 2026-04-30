@@ -5,6 +5,10 @@
 #include <missing_libultra.h>
 #include <PR/os.h>
 
+#ifndef PORT_HAS_RUMBLE
+#define PORT_HAS_RUMBLE 1
+#endif
+
 // 0x800450F0
 OSMesgQueue sSYControllerInitMesgQueue; // Queue for OS controller Init, Status, and Read
 
@@ -354,19 +358,31 @@ void syControllerUpdateRumbleEvent(s32 port, s32 ev_kind)
 // 0x80004474
 void syControllerStartRumble(s32 port)
 {
+#if PORT_HAS_RUMBLE
     syControllerUpdateRumbleEvent(port, 1);
+#else
+    (void)port;
+#endif
 }
 
 // 0x80004494
 void syControllerStopRumble(s32 port)
 {
+#if PORT_HAS_RUMBLE
     syControllerUpdateRumbleEvent(port, 2);
+#else
+    (void)port;
+#endif
 }
 
 // 0x800044B4
 void syControllerInitRumble(s32 port)
 {
+#if PORT_HAS_RUMBLE
     syControllerUpdateRumbleEvent(port, 0);
+#else
+    (void)port;
+#endif
 }
 
 // 0x800044D4
@@ -433,7 +449,9 @@ void syControllerParseEvent(ControllerEvent *evt)
         }
         case CONT_EVENT_MOTOR:
         {
-            // why
+            /* PORT: Assumes N64 controller pak + motor availability (CONT_CARD_ON +
+             * osMotor* APIs). PSP keeps this path compiled but fronted by
+             * PORT_HAS_RUMBLE-gated no-op calls at integration boundaries. */
             if
             (
                 !(sSYControllerDescs[((ContMotorEvt *)evt)->contID].unk1C) &&

@@ -2,6 +2,10 @@
 #include <gm/generic.h>
 #include <sys/controller.h>
 
+#ifndef PORT_HAS_RUMBLE
+#define PORT_HAS_RUMBLE 1
+#endif
+
 #ifdef PORT
 /* GMRumbleEventDefault reorders its bitfields by host endian so the opcode
  * always occupies the low 3 bits. Positional initializers bind by field
@@ -212,7 +216,10 @@ sb32 gmRumbleUpdateEventExecute(ub8 *is_active, GMRumbleScript *p_script, s32 pl
 
             if (*is_active == FALSE)
             {
-                syControllerStartRumble(player);
+                if (PORT_HAS_RUMBLE)
+                {
+                    syControllerStartRumble(player);
+                }
 
                 *is_active = p_script->is_rumble_active = TRUE;
             }
@@ -225,7 +232,10 @@ sb32 gmRumbleUpdateEventExecute(ub8 *is_active, GMRumbleScript *p_script, s32 pl
 
             if (*is_active != FALSE)
             {
-                syControllerStopRumble(player);
+                if (PORT_HAS_RUMBLE)
+                {
+                    syControllerStopRumble(player);
+                }
 
                 *is_active = p_script->is_rumble_active = FALSE;
             }
