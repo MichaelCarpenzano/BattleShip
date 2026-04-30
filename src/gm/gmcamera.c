@@ -1248,6 +1248,12 @@ void gmCameraScreenFlashProcDisplay(GObj *camera_gobj)
         Vp_t *viewport;
         s32 ulx, uly, lrx, lry;
 
+        /*
+         * PSP backend compatibility note:
+         * gSPViewport + gDPSetScissor emitted here are expected to be translated
+         * by the renderer boundary into GU viewport/scissor state, while camera
+         * logic and display-list emission remain unchanged.
+         */
         gSPViewport(gSYTaskmanDLHeads[0]++, &CObjGetStruct(gGMCameraGObj)->viewport);
 
         viewport = &CObjGetStruct(gGMCameraGObj)->viewport.vp;

@@ -1,6 +1,7 @@
 #include "video.h"
 #include <PR/mbi.h>
 #include <sys/scheduler.h>
+#include <platform/psp/psp_renderer_backend.h>
 
 // // // // // // // // // // // //
 //                               //
@@ -168,6 +169,14 @@ void syVideoSetScreenSettings(s32 width, s32 height, u32 flags)
 // Apply video setup
 void syVideoInit(SYVideoSetup *video_setup)
 {
+    // PSP backend boundary: video init remains source-of-truth, renderer backend mirrors RT attachments.
+    pspRendererBackendNotifyVideoInit(
+        video_setup->framebuffers[0],
+        video_setup->framebuffers[1],
+        video_setup->framebuffers[2],
+        video_setup->zbuffer
+    );
+
     syVideoSetFramebuffers(video_setup->framebuffers[0], video_setup->framebuffers[1], video_setup->framebuffers[2]);
     gSYVideoZBuffer = video_setup->zbuffer;
     syVideoSetScreenSettings(video_setup->width, video_setup->height, video_setup->flags);

@@ -9,6 +9,7 @@
 #include <sys/video.h>
 #include <sys/scheduler.h>
 #include <sys/controller.h>
+#include <platform/psp/psp_renderer_backend.h>
 
 #include <macros.h>
 #include <ssb_types.h>
@@ -816,6 +817,7 @@ void syTaskmanUpdateDLBuffers(void)
 {
 	s32 i;
 	s32 diffs;
+	PSPRendererBoundaryState boundary_state;
 
 	syTaskmanCheckBufferLengths();
 
@@ -897,6 +899,18 @@ void syTaskmanUpdateDLBuffers(void)
 	}
 	D_80046628 = 0;
 	syTaskmanCheckBufferLengths();
+
+	// PSP backend handoff scaffold: centralized DL enqueue point stays unchanged; backend consumes the same intent.
+	boundary_state.dl_heads[0] = gSYTaskmanDLHeads[0];
+	boundary_state.dl_heads[1] = gSYTaskmanDLHeads[1];
+	boundary_state.dl_heads[2] = gSYTaskmanDLHeads[2];
+	boundary_state.dl_heads[3] = gSYTaskmanDLHeads[3];
+	boundary_state.dl_branches[0] = sSYTaskmanDLBranches[0];
+	boundary_state.dl_branches[1] = sSYTaskmanDLBranches[1];
+	boundary_state.dl_branches[2] = sSYTaskmanDLBranches[2];
+	boundary_state.dl_branches[3] = sSYTaskmanDLBranches[3];
+	boundary_state.active_task_id = gSYTaskmanTaskID;
+	pspRendererBackendMarkEnqueue(&boundary_state);
 }
 
 // 0x80005AE4
@@ -1162,6 +1176,16 @@ void func_800062EC(SYTaskFunction *tfunc)
 	tfunc->scene_draw();
 
 	func_800053CC();
+	// PSP backend handoff scaffold: flush interpreter output for the 2D/UI correctness-first path.
+	{
+		PSPRendererBoundaryState boundary_state =
+		{
+			{ gSYTaskmanDLHeads[0], gSYTaskmanDLHeads[1], gSYTaskmanDLHeads[2], gSYTaskmanDLHeads[3] },
+			{ sSYTaskmanDLBranches[0], sSYTaskmanDLBranches[1], sSYTaskmanDLBranches[2], sSYTaskmanDLBranches[3] },
+			gSYTaskmanTaskID
+		};
+		pspRendererBackendFlush(&boundary_state, nPSPRendererPassUI2D);
+	}
 	syVideoApplySettingsNoBlock(sSYTaskmanViBuffers[gSYTaskmanTaskID]);
 	func_80004EFC();
 }
@@ -1187,6 +1211,16 @@ void syTaskmanCommonTaskDraw(SYTaskFunction *tfunc)
 	tfunc->scene_draw();
 
 	func_800053CC();
+	// PSP backend handoff scaffold: keep game logic DL emission as-is; swap only interpretation/execution backend.
+	{
+		PSPRendererBoundaryState boundary_state =
+		{
+			{ gSYTaskmanDLHeads[0], gSYTaskmanDLHeads[1], gSYTaskmanDLHeads[2], gSYTaskmanDLHeads[3] },
+			{ sSYTaskmanDLBranches[0], sSYTaskmanDLBranches[1], sSYTaskmanDLBranches[2], sSYTaskmanDLBranches[3] },
+			gSYTaskmanTaskID
+		};
+		pspRendererBackendFlush(&boundary_state, nPSPRendererPassUI2D);
+	}
 	syVideoApplySettingsNoBlock(sSYTaskmanViBuffers[gSYTaskmanTaskID]);
 	func_80004EFC();
 
@@ -1285,6 +1319,7 @@ void syTaskmanLoadScene(SYTaskmanSceneSetup *tscene, void (*func_start)(void))
 	syControllerSetAutoRead((syControllerScheduleRead != sSYTaskmanFuncController) ? TRUE : FALSE);
 
 	dSYTaskmanUpdateCount = dSYTaskmanFrameCount = 0;
+	pspRendererBackendInit();
 
 #ifdef PORT
 	port_log("SSB64: syTaskmanLoadScene — about to call func_start=%p\n", (void *)func_start);

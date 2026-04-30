@@ -530,6 +530,7 @@ void scVSBattleStartScene(void)
 		gSCManagerBattleState->gkind = nGRKindCastle;
 	}
 	dSCVSBattleVideoSetup.zbuffer = SYVIDEO_ZBUFFER_START(320, 240, 0, 10, u16);
+	// PSP backend compatibility note: scene/gameplay DL generation is unchanged; backend boundary handles execution translation.
 	syVideoInit(&dSCVSBattleVideoSetup);
 
 	dSCVSBattleTaskmanSetup.scene_setup.arena_size = (size_t) ((uintptr_t)&gSYFramebufferSets - (uintptr_t)&ovl4_BSS_END);

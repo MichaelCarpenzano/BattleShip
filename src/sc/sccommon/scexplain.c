@@ -230,6 +230,11 @@ void scExplainMakeCamera(void)
 // 0x8018D2D0
 void scExplainWindowProcDisplay(GObj *gobj)
 {
+    /*
+     * PSP backend compatibility note:
+     * this UI overlay path intentionally keeps N64 macros (scissor/cycle/render/fill)
+     * and relies on backend translation to PSP GU state + rect commands.
+     */
     gDPPipeSync(gSYTaskmanDLHeads[0]++);
     gDPSetScissor(gSYTaskmanDLHeads[0]++, G_SC_NON_INTERLACE, 10, 160, 310, 230);
     gDPSetCycleType(gSYTaskmanDLHeads[0]++, G_CYC_FILL);
