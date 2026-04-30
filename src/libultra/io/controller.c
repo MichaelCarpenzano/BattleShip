@@ -14,6 +14,7 @@ OSMesg __osEepromTimerMsg;
 s32 __osContinitialized = 0;
 
 s32 osContInit(OSMesgQueue* mq, u8* bitpattern, OSContStatus* data) {
+	/* PSP: routed via psp_os_* shim for timer/message blocking semantics. */
 	OSMesg dummy;
 	s32 ret = 0;
 	OSTime t;

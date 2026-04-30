@@ -1,8 +1,14 @@
 #include <PR/os_internal.h>
 #include <PR/ultraerror.h>
 #include <osint.h>
+#if defined(PLATFORM_PSP)
+#include "platform/psp/psp_os_msgq.h"
+#endif
 
 s32 osSendMesg(OSMesgQueue* mq, OSMesg msg, s32 flags) {
+#if defined(PLATFORM_PSP)
+	return psp_os_send_mesg(mq, msg, flags);
+#endif
 	register u32 saveMask;
 	register s32 last;
 

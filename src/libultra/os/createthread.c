@@ -2,10 +2,17 @@
 #include <PR/R4300.h>
 #include <PR/ultraerror.h>
 #include <osint.h>
+#if defined(PLATFORM_PSP)
+#include "platform/psp/psp_os_thread.h"
+#endif
 
 extern __OSThreadprofile_s thprof[];
 
 void osCreateThread(OSThread* t, OSId id, void (*entry)(void*), void* arg, void* sp, OSPri p) {
+#if defined(PLATFORM_PSP)
+	psp_os_create_thread(t, id, entry, arg, sp, p);
+	return;
+#endif
 	register u32 saveMask;
 	OSIntMask mask;
 

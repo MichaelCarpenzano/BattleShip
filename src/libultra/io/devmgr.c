@@ -3,6 +3,7 @@
 #include <piint.h>
 
 void __osDevMgrMain(void* args) {
+	/* PSP: routed via psp_os_* shim for message/event timing compatibility. */
 	OSIoMesg* mb;
 	OSMesg em;
 	OSMesg dummy;

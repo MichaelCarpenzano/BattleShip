@@ -20,6 +20,7 @@ static OSIoMesg viCounterMsg ALIGNED(8);
 static void viMgrMain(void* arg);
 
 void osCreateViManager(OSPri pri) {
+	/* PSP: routed via psp_os_* shim for queue/event/thread compatibility. */
 	u32 savedMask;
 	OSPri oldPri;
 	OSPri myPri;
@@ -65,6 +66,7 @@ void osCreateViManager(OSPri pri) {
 }
 
 static void viMgrMain(void* arg) {
+	/* PSP: routed via psp_os_* shim for queue blocking/timing behavior. */
 	__OSViContext* vc;
 	OSDevMgr* dm;
 	OSIoMesg* mb;

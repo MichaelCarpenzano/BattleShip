@@ -1,8 +1,15 @@
 #include <PR/os_internal.h>
 #include <PR/ultraerror.h>
 #include <osint.h>
+#if defined(PLATFORM_PSP)
+#include "platform/psp/psp_os_msgq.h"
+#endif
 
 void osCreateMesgQueue(OSMesgQueue* mq, OSMesg* msg, s32 msgCount) {
+#if defined(PLATFORM_PSP)
+	psp_os_create_mesg_queue(mq, msg, msgCount);
+	return;
+#endif
 
 #ifdef _DEBUG
 	if (msgCount <= 0) {

@@ -1,8 +1,14 @@
 #include <PR/os_internal.h>
 #include <PR/ultraerror.h>
 #include <osint.h>
+#if defined(PLATFORM_PSP)
+#include "platform/psp/psp_os_msgq.h"
+#endif
 
 s32 osRecvMesg(OSMesgQueue* mq, OSMesg* msg, s32 flags) {
+#if defined(PLATFORM_PSP)
+	return psp_os_recv_mesg(mq, msg, flags);
+#endif
 	register u32 saveMask;
 
 #ifdef _DEBUG
