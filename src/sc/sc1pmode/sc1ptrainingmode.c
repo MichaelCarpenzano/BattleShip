@@ -738,6 +738,8 @@ void sc1PTrainingModeLoadWallpaper(void)
 		lbRelocGetForceExternHeapFile
 		(
 			dSC1PTrainingModeWallpaperDescs[dSC1PTrainingModeWallpaperIDs[gSCManagerBattleState->gkind]].file_id,
+			// TODO(PORT PSP): this subtraction still assumes the resolved wallpaper
+			// token points into a stable native file blob base.
 			(void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->wallpaper) - (intptr_t)dSC1PTrainingModeWallpaperHeapOffsets[gSCManagerBattleState->gkind])
 		),
 		dSC1PTrainingModeWallpaperDescs[dSC1PTrainingModeWallpaperIDs[gSCManagerBattleState->gkind]].offset

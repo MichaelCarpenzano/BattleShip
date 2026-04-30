@@ -399,12 +399,12 @@ struct DObjTransformTypes
 //                               //
 // // // // // // // // // // // //
 
-// File-data structs use u32 tokens in place of pointers on 64-bit PC.
-// The relocation bridge writes tokens into 4-byte slots; game code
-// resolves them back to real pointers via PORT_RESOLVE().
-// PORT_REGISTER() converts a runtime pointer to a token for storage
-// in a token field (e.g. when overriding a sprite LUT at runtime).
-// On non-PORT builds both macros are no-op passthroughs.
+// Invariants for portability work:
+//  - Fields declared as u32 under PORT are relocation TOKENS, not host pointers.
+//  - Fields declared as pointer types are native pointers and must not be tokenized.
+//  - Token fields must be read with PORT_RESOLVE*() and written with PORT_REGISTER().
+//  - Avoid ad-hoc casts between token fields and pointers in gameplay code.
+// On non-PORT builds these wrappers collapse to normal pointer operations.
 #ifdef PORT
 extern void *portRelocResolvePointer(unsigned int token);
 extern void *portRelocResolvePointerDebug(unsigned int token, const char *file, int line);
@@ -413,10 +413,16 @@ extern void *portRelocResolveArrayEntry(const void *array_ptr, unsigned int inde
 #define PORT_RESOLVE(token) portRelocResolvePointerDebug((unsigned int)(token), __FILE__, __LINE__)
 #define PORT_REGISTER(ptr) portRelocRegisterPointer((void*)(ptr))
 #define PORT_RESOLVE_ARRAY(array_ptr, index) portRelocResolveArrayEntry((const void*)(array_ptr), (unsigned int)(index))
+#define PORT_TOKEN_FROM_PTR(ptr) PORT_REGISTER(ptr)
+#define PORT_PTR_FROM_TOKEN(type, token) ((type*)PORT_RESOLVE(token))
+#define PORT_PTR_FROM_TOKEN_ARRAY(type, token_array_ptr, index) ((type*)PORT_RESOLVE_ARRAY((token_array_ptr), (index)))
 #else
 #define PORT_RESOLVE(token) (token)
 #define PORT_REGISTER(ptr) (ptr)
 #define PORT_RESOLVE_ARRAY(array_ptr, index) (((array_ptr) != NULL) ? ((void *const*)(array_ptr))[index] : NULL)
+#define PORT_TOKEN_FROM_PTR(ptr) (ptr)
+#define PORT_PTR_FROM_TOKEN(type, token) ((type*)(token))
+#define PORT_PTR_FROM_TOKEN_ARRAY(type, token_array_ptr, index) ((type*)PORT_RESOLVE_ARRAY((token_array_ptr), (index)))
 #endif
 
 struct DObjDesc

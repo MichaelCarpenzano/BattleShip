@@ -1,5 +1,6 @@
 #include "RelocPointerTable.h"
 
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <spdlog/spdlog.h>
@@ -71,6 +72,10 @@ extern "C" {
 
 uint32_t portRelocRegisterPointer(void *ptr)
 {
+	#ifndef NDEBUG
+	assert((ptr == nullptr) || (reinterpret_cast<uintptr_t>(ptr) != 0));
+	#endif
+
 	if (ptr == nullptr)
 	{
 		return 0;
@@ -90,6 +95,10 @@ void *portRelocResolvePointer(uint32_t token)
 
 void *portRelocResolvePointerDebug(uint32_t token, const char *file, int line)
 {
+	#ifndef NDEBUG
+	assert((token & TOKEN_INDEX_MASK) != 0);
+	#endif
+
 	if (token == 0)
 	{
 		return nullptr;
@@ -112,6 +121,11 @@ void *portRelocResolvePointerDebug(uint32_t token, const char *file, int line)
 		}
 		return nullptr;
 	}
+
+	#ifndef NDEBUG
+	assert(index < sNextIndex);
+	assert((sPointerTable != nullptr) && "token decode succeeded without pointer table");
+	#endif
 
 	return sPointerTable[index];
 }

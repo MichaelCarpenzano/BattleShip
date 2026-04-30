@@ -454,6 +454,9 @@ void sc1PBonusStageMakeTargets(void)
 
 	vel.x = vel.y = vel.z = 0.0F;
 
+	// TODO(PORT PSP): this path still derives file-base relationships through
+	// pointer arithmetic and token-origin offsets. Keep under audit during
+	// deep backend swap work.
 #ifdef PORT
 	dobjdesc = (DObjDesc*)(file_base + target->dobjdesc);
 	anim_joints = (u32*)(file_base + target->anim_joint);

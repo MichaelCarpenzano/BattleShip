@@ -903,6 +903,9 @@ GObj* sc1PGameBossMakeWallpaperEffect(s32 effect_id, s32 anim_id, s32 plan_id)
     {
         return NULL;
     }
+    // TODO(PORT PSP): `file_head + offset` arithmetic assumes contiguous native
+    // pointer backing for this file blob. Re-validate if tokenized file handles
+    // replace direct host pointers in the backend swap.
     addr = (uintptr_t)sSC1PGameBossMain.file_head;
     o_mobjsub = sSC1PGameBossMain.bosswallpaper->bosseffect[effect_id].o_mobjsub;
 
