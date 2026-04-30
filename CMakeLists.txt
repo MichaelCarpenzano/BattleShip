@@ -29,20 +29,33 @@ option(NON_MATCHING "Build without matching decomp constraints" ON)
 option(NON_EQUIVALENT "Build without equivalent decomp constraints" ON)
 option(USE_AUTO_VCPKG "Use automated vcpkg for dependency management" ON)
 option(SSB64_STAGE_CYCLE_DEMO "Boot directly into attract-demo stage cycle for rendering regression testing" OFF)
+set(SSB64_PLATFORM "LUS" CACHE STRING "Runtime backend: LUS or PSP")
+set_property(CACHE SSB64_PLATFORM PROPERTY STRINGS LUS PSP)
+
+if (NOT SSB64_PLATFORM STREQUAL "LUS" AND NOT SSB64_PLATFORM STREQUAL "PSP")
+    message(FATAL_ERROR "Unsupported SSB64_PLATFORM='${SSB64_PLATFORM}'. Expected one of: LUS, PSP.")
+endif()
 
 ################################################################################
 # libultraship configuration (set before add_subdirectory)
+# NOTE: This block is LUS-only and is a primary PSP replacement point.
 ################################################################################
 
-# O2R (ZIP) only, no MPQ/StormLib
-set(INCLUDE_MPQ_SUPPORT OFF CACHE BOOL "" FORCE)
-set(GBI_UCODE "F3DEX_GBI_2" CACHE STRING "" FORCE)
+if (SSB64_PLATFORM STREQUAL "LUS")
+    # O2R (ZIP) only, no MPQ/StormLib
+    set(INCLUDE_MPQ_SUPPORT OFF CACHE BOOL "" FORCE)
+    set(GBI_UCODE "F3DEX_GBI_2" CACHE STRING "" FORCE)
+endif()
 
 ################################################################################
 # Subdirectories: libultraship
+# NOTE: LUS backend dependency wiring; PSP backend intentionally does not use
+# this and should provide replacements in src/platform/psp/.
 ################################################################################
 
-add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
+if (SSB64_PLATFORM STREQUAL "LUS")
+    add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
+endif()
 
 # Note: Torch is built as a standalone tool via ExternalProject (see bottom of file).
 # It is NOT added as a subdirectory since it builds as an executable, not a library.
@@ -155,8 +168,13 @@ endif()
 add_library(ssb64_game OBJECT ${SSB64_DECOMP_SOURCES})
 
 # Port stub definitions (C code that satisfies N64 linker symbols)
-file(GLOB SSB64_STUBS "port/stubs/*.c")
-target_sources(ssb64_game PRIVATE ${SSB64_STUBS})
+# Runtime-specific stubs (backend-specific compilation units).
+if (SSB64_PLATFORM STREQUAL "LUS")
+    file(GLOB SSB64_RUNTIME_STUBS "port/stubs/*.c")
+elseif (SSB64_PLATFORM STREQUAL "PSP")
+    file(GLOB SSB64_RUNTIME_STUBS "src/platform/psp/*.c")
+endif()
+target_sources(ssb64_game PRIVATE ${SSB64_RUNTIME_STUBS})
 
 # Selectively include decomp libultra files that provide needed functionality.
 # These are pure C implementations that work on any platform.
@@ -258,6 +276,10 @@ add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_O
 # but the produced executable is `BattleShip` / `BattleShip.exe`.
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "BattleShip")
 
+if (SSB64_PLATFORM STREQUAL "PSP" AND NOT CMAKE_SYSTEM_NAME STREQUAL "PSP")
+    message(FATAL_ERROR "SSB64_PLATFORM=PSP requires a PSP toolchain (CMAKE_SYSTEM_NAME=PSP).")
+endif()
+
 ################################################################################
 # Compile definitions
 ################################################################################
@@ -275,11 +297,31 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 ################################################################################
-# Link libultraship and Torch
+# Runtime backend linking and dependencies
+# NOTE: The LUS path below is intentionally isolated to mark PSP replacement
+# points while preserving existing shared game logic source lists.
 ################################################################################
 
-add_dependencies(${PROJECT_NAME} libultraship)
-target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
+if (SSB64_PLATFORM STREQUAL "LUS")
+    add_dependencies(${PROJECT_NAME} libultraship)
+    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
+elseif (SSB64_PLATFORM STREQUAL "PSP")
+    find_package(PSPSDK REQUIRED)
+    target_include_directories(${PROJECT_NAME} PRIVATE ${PSPSDK_INCLUDE_DIRS})
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        pspdebug
+        pspdisplay
+        pspge
+        pspgum
+        pspgu
+        pspctrl
+        pspaudiolib
+        pspaudio
+        pspvfpu
+    )
+else()
+    message(FATAL_ERROR "Unsupported backend combination for SSB64_PLATFORM='${SSB64_PLATFORM}'.")
+endif()
 
 ################################################################################
 # Platform-specific settings
