@@ -3,6 +3,17 @@
 
 #include <PR/ultratypes.h>
 
+#ifdef PORT
+#ifndef __wint_t_defined
+#ifdef __WINT_TYPE__
+typedef __WINT_TYPE__ wint_t;
+#else
+typedef unsigned int wint_t;
+#endif
+#define __wint_t_defined 1
+#endif
+#endif
+
 #ifdef _MSC_VER
 /* MSVC: offsetof is a compiler intrinsic */
 #ifndef offsetof

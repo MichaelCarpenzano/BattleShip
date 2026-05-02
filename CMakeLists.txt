@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.24.0 FATAL_ERROR)
 
 project(ssb64 LANGUAGES C CXX)
 
+# Keep compile_commands.json available for clangd/IDE diagnostics.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Pulled-in BEFORE the libultraship subdirectory so its
 # find_package(tinyxml2) sees our pkg-config-fallback shim. Required
 # for Ubuntu 22.04 jammy, where libtinyxml2-dev ships no CMake config.
@@ -54,7 +57,14 @@ endif()
 ################################################################################
 
 if (SSB64_PLATFORM STREQUAL "LUS")
-    add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
+    set(SSB64_LUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libultraship")
+    if (NOT EXISTS "${SSB64_LUS_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "libultraship CMakeLists.txt not found at '${SSB64_LUS_DIR}/CMakeLists.txt'.\n"
+            "Ensure the submodule is initialized in this checkout/worktree."
+        )
+    endif()
+    add_subdirectory("${SSB64_LUS_DIR}" "${CMAKE_BINARY_DIR}/libultraship")
 endif()
 
 # Note: Torch is built as a standalone tool via ExternalProject (see bottom of file).
@@ -83,6 +93,11 @@ file(GLOB_RECURSE SSB64_SRC_WP      "src/wp/*.c"      "src/wp/*.h")
 # Port layer (C++ glue) — excludes port/stubs/ which is compiled as part of ssb64_game
 file(GLOB_RECURSE SSB64_SRC_PORT "port/*.cpp" "port/*.c" "port/*.h")
 list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/stubs/")
+
+# PSP backend executable sources (standalone runtime, no libultraship).
+set(SSB64_PSP_RUNTIME_SOURCES
+    src/platform/psp/psp_main.c
+)
 
 # Debug tools (GBI trace + Acmd trace systems)
 file(GLOB SSB64_DEBUG_TOOLS
@@ -147,6 +162,7 @@ set(SSB64_COMPILE_DEFS
 
 if (SSB64_PLATFORM STREQUAL "PSP")
     list(APPEND SSB64_COMPILE_DEFS
+        PLATFORM_PSP=1
         PORT_HAS_RUMBLE=0
         PORT_HAS_ANALOG_STICK=1
     )
@@ -173,6 +189,7 @@ if (SSB64_PLATFORM STREQUAL "LUS")
     file(GLOB SSB64_RUNTIME_STUBS "port/stubs/*.c")
 elseif (SSB64_PLATFORM STREQUAL "PSP")
     file(GLOB SSB64_RUNTIME_STUBS "src/platform/psp/*.c")
+    list(FILTER SSB64_RUNTIME_STUBS EXCLUDE REGEX "src/platform/psp/psp_main\\.c$")
 endif()
 target_sources(ssb64_game PRIVATE ${SSB64_RUNTIME_STUBS})
 
@@ -229,6 +246,11 @@ target_include_directories(ssb64_game PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools # Acmd trace (mixer.h calls acmd_trace_log_cmd)
 )
 
+if (SSB64_PLATFORM STREQUAL "PSP")
+    find_package(PSPSDK REQUIRED)
+    target_include_directories(ssb64_game PRIVATE ${PSPSDK_INCLUDE_DIRS})
+endif()
+
 # Clang 16+ promoted several historically-warning diagnostics to errors by
 # default, which breaks the decomp C code on macOS/Linux. The decomp was
 # written against IDO 7.1 and relies on implicit function declarations, loose
@@ -269,15 +291,38 @@ endif()
 # Executable target — port C++ code + decomp object library
 ################################################################################
 
-add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
+if (SSB64_PLATFORM STREQUAL "LUS")
+    set(SSB64_EXECUTABLE_SOURCES ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS})
+elseif (SSB64_PLATFORM STREQUAL "PSP")
+    set(SSB64_EXECUTABLE_SOURCES ${SSB64_PSP_RUNTIME_SOURCES})
+else()
+    message(FATAL_ERROR "Unsupported SSB64_PLATFORM='${SSB64_PLATFORM}'.")
+endif()
+
+if (SSB64_PLATFORM STREQUAL "PSP")
+    # Phase 1 bootstrap: produce a PSP-linking executable without pulling the
+    # full game object graph yet. The decomp object library still builds as a
+    # separate target for compile validation.
+    add_executable(${PROJECT_NAME} ${SSB64_EXECUTABLE_SOURCES})
+    add_dependencies(${PROJECT_NAME} ssb64_game)
+else()
+    add_executable(${PROJECT_NAME} ${SSB64_EXECUTABLE_SOURCES} $<TARGET_OBJECTS:ssb64_game>)
+endif()
 
 # User-facing binary name. The CMake target keeps the historical
 # `ssb64` identifier (matches the repo, build dirs, internal symbols),
 # but the produced executable is `BattleShip` / `BattleShip.exe`.
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "BattleShip")
 
-if (SSB64_PLATFORM STREQUAL "PSP" AND NOT CMAKE_SYSTEM_NAME STREQUAL "PSP")
-    message(FATAL_ERROR "SSB64_PLATFORM=PSP requires a PSP toolchain (CMAKE_SYSTEM_NAME=PSP).")
+if (SSB64_PLATFORM STREQUAL "PSP")
+    if (NOT CMAKE_C_COMPILER MATCHES "psp-gcc")
+        message(FATAL_ERROR
+            "SSB64_PLATFORM=PSP requires the PSPSDK cross toolchain.\n"
+            "Reconfigure with:\n"
+            "  -DCMAKE_TOOLCHAIN_FILE=$ENV{PSPDEV}/psp/share/pspdev.cmake\n"
+            "and ensure PSPDEV + PATH include the pspdev toolchain bin directory."
+        )
+    endif()
 endif()
 
 ################################################################################
@@ -291,10 +336,20 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE ${SSB64_COMPILE_DEFS})
 ################################################################################
 
 target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/port
-    ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
 )
+
+if (SSB64_PLATFORM STREQUAL "LUS")
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/port
+        ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
+    )
+elseif (SSB64_PLATFORM STREQUAL "PSP")
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/psp
+    )
+endif()
 
 ################################################################################
 # Runtime backend linking and dependencies
@@ -308,6 +363,7 @@ if (SSB64_PLATFORM STREQUAL "LUS")
 elseif (SSB64_PLATFORM STREQUAL "PSP")
     find_package(PSPSDK REQUIRED)
     target_include_directories(${PROJECT_NAME} PRIVATE ${PSPSDK_INCLUDE_DIRS})
+    target_link_directories(${PROJECT_NAME} PRIVATE ${PSPSDK_LIBRARY_DIRS})
     target_link_libraries(${PROJECT_NAME} PRIVATE
         pspdebug
         pspdisplay
@@ -318,7 +374,19 @@ elseif (SSB64_PLATFORM STREQUAL "PSP")
         pspaudiolib
         pspaudio
         pspvfpu
+        m
     )
+
+    # Optional PSP packaging helper (if provided by the PSP toolchain module).
+    if (COMMAND create_pbp_file)
+        set(PSP_DEPLOY_DIR ${CMAKE_BINARY_DIR}/psp-deploy)
+        file(MAKE_DIRECTORY ${PSP_DEPLOY_DIR})
+        create_pbp_file(
+            TARGET ${PROJECT_NAME}
+            TITLE "BattleShip"
+            PBP_OUTPUT ${PSP_DEPLOY_DIR}/EBOOT.PBP
+        )
+    endif()
 else()
     message(FATAL_ERROR "Unsupported backend combination for SSB64_PLATFORM='${SSB64_PLATFORM}'.")
 endif()
@@ -354,20 +422,24 @@ configure_file(
 
 # Build Torch as a standalone tool for asset extraction
 include(ExternalProject)
-ExternalProject_Add(TorchExternal
-    PREFIX TorchExternal
-    SOURCE_DIR ${CMAKE_SOURCE_DIR}/torch
-    CMAKE_ARGS
-        -DCMAKE_BUILD_TYPE=Release
-        -DUSE_STANDALONE=ON
-        -DBUILD_SSB64=ON
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/torch-install
-)
+if (EXISTS "${CMAKE_SOURCE_DIR}/torch/CMakeLists.txt")
+    ExternalProject_Add(TorchExternal
+        PREFIX TorchExternal
+        SOURCE_DIR ${CMAKE_SOURCE_DIR}/torch
+        CMAKE_ARGS
+            -DCMAKE_BUILD_TYPE=Release
+            -DUSE_STANDALONE=ON
+            -DBUILD_SSB64=ON
+            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/torch-install
+    )
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(TORCH_EXECUTABLE ${CMAKE_BINARY_DIR}/torch-install/bin/torch.exe)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(TORCH_EXECUTABLE ${CMAKE_BINARY_DIR}/torch-install/bin/torch.exe)
+    else()
+        set(TORCH_EXECUTABLE ${CMAKE_BINARY_DIR}/torch-install/bin/torch)
+    endif()
 else()
-    set(TORCH_EXECUTABLE ${CMAKE_BINARY_DIR}/torch-install/bin/torch)
+    message(WARNING "Torch source tree is missing; ExtractAssets/GeneratePortO2R targets will be no-ops.")
 endif()
 
 # Accept .z64 (big-endian), .n64 (little-endian), or .v64 (byteswapped).
@@ -383,16 +455,25 @@ if(NOT SSB64_BASEROM)
     set(SSB64_BASEROM "${CMAKE_SOURCE_DIR}/baserom.us.z64")
 endif()
 
-add_custom_target(ExtractAssets
-    DEPENDS TorchExternal
-    COMMAND ${TORCH_EXECUTABLE} o2r ${SSB64_BASEROM}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Extracting assets from ${SSB64_BASEROM} into O2R archive"
-)
+if (EXISTS "${CMAKE_SOURCE_DIR}/torch/CMakeLists.txt")
+    add_custom_target(ExtractAssets
+        DEPENDS TorchExternal
+        COMMAND ${TORCH_EXECUTABLE} o2r ${SSB64_BASEROM}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Extracting assets from ${SSB64_BASEROM} into O2R archive"
+    )
 
-add_custom_target(GeneratePortO2R
-    DEPENDS TorchExternal
-    COMMAND ${TORCH_EXECUTABLE} pack assets ssb64.o2r o2r
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Packing port-specific assets into ssb64.o2r"
-)
+    add_custom_target(GeneratePortO2R
+        DEPENDS TorchExternal
+        COMMAND ${TORCH_EXECUTABLE} pack assets ssb64.o2r o2r
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Packing port-specific assets into ssb64.o2r"
+    )
+else()
+    add_custom_target(ExtractAssets
+        COMMAND ${CMAKE_COMMAND} -E echo "Torch source tree missing; skipping ExtractAssets."
+    )
+    add_custom_target(GeneratePortO2R
+        COMMAND ${CMAKE_COMMAND} -E echo "Torch source tree missing; skipping GeneratePortO2R."
+    )
+endif()

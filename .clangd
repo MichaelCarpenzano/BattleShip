@@ -1,0 +1,6 @@
+CompileFlags:
+  CompilationDatabase: build-codex-psp-check
+  QueryDriver:
+    - /Users/*/pspdev/bin/psp-*
+    - /opt/homebrew/pspdev/bin/psp-*
+    - /usr/local/pspdev/bin/psp-*

@@ -23,7 +23,7 @@ void ssb64_psp_audio_submit(const int16_t *interleaved_pcm)
 {
     if ((sSSB64PspAudioChannel >= 0) && (interleaved_pcm != NULL))
     {
-        (void)sceAudioOutputBlocking(sSSB64PspAudioChannel, PSP_AUDIO_VOLUME_MAX, interleaved_pcm);
+        (void)sceAudioOutputBlocking(sSSB64PspAudioChannel, PSP_AUDIO_VOLUME_MAX, (void*)interleaved_pcm);
     }
 }
 

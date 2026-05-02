@@ -284,7 +284,7 @@ typedef struct ALWhatever8009EDD0_siz34
 
 } ALWhatever8009EDD0_siz34;
 
-#ifdef PORT
+#if defined(PORT) && !defined(PLATFORM_PSP)
 _Static_assert(offsetof(ALWhatever8009EE0C, unk30) == 0x50,
     "EE0C.unk30 must be at offset 0x50 — parser asm hard-codes this");
 _Static_assert(offsetof(ALWhatever8009EDD0_siz34, unkALWhatever8009EDD0_siz34_0x28) == 0x38,

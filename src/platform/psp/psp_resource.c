@@ -61,11 +61,12 @@ PspResourceHandle* pspResourceOpen(const char* path, const char* mode)
         return NULL;
     }
 
-    handle = (PspResourceHandle*)calloc(1, sizeof(*handle));
+    handle = (PspResourceHandle*)malloc(sizeof(*handle));
     if (handle == NULL) {
         port_log("[psp_resource] alloc failed opening %s", path);
         return NULL;
     }
+    memset(handle, 0, sizeof(*handle));
 
     /*
      * Scaffolding note:
@@ -83,8 +84,12 @@ PspResourceHandle* pspResourceOpen(const char* path, const char* mode)
     }
 
     /* Allow direct/open-absolute paths as final fallback. */
-    strncpy(handle->path, path, sizeof(handle->path) - 1);
-    handle->path[sizeof(handle->path) - 1] = '\0';
+    {
+        size_t path_len = strlen(path);
+        size_t copy_len = (path_len < (sizeof(handle->path) - 1)) ? path_len : (sizeof(handle->path) - 1);
+        memcpy(handle->path, path, copy_len);
+        handle->path[copy_len] = '\0';
+    }
     handle->fp = fopen(handle->path, mode);
     if (handle->fp != NULL) {
         return handle;

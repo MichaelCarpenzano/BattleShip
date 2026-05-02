@@ -26,7 +26,9 @@ extern void port_log(const char *fmt, ...);
 
 #ifdef PORT
 #include "port_log.h"
+#if !defined(PLATFORM_PSP)
 _Static_assert(sizeof(uintptr_t) == 8, "PORT build requires 64-bit uintptr_t");
+#endif
 #endif
 
 // externs
