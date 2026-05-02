@@ -15,6 +15,11 @@ extern void port_coroutine_yield(void);
 #include <wp/wpmanager.h>
 extern void *func_800269C0_275C0(u16 id);
 extern void func_800266A0_272A0(void);
+#ifdef PORT
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -1791,6 +1796,31 @@ void sc1PGameInitTeamStockDisplay(void)
         );
         sprite = lbRelocGetFileData(Sprite*, sSC1PGameZakoStockFile, llFTStocksZakoSprite);
 
+#ifdef PORT
+        /* Sprite came straight out of the loaded file with only pass1
+         * BSWAP32 applied — every {s16,s16} pair still needs its halves
+         * swapped, and the Bitmap array + texel data need their own
+         * fixup before the renderer walks them.  Without this, the
+         * Zako stock sprite reads `nbitmaps = 36` (the original
+         * `ndisplist` value) and the per-frame draw at
+         * `sc1PGameTeamStockDisplayProcDisplay` walks 36 garbage Bitmap
+         * structs, producing the issue-#53 lag flood (~280k stale-token
+         * errors / run) and the visibly-broken stock icons.  Other
+         * sprite paths (lbCommonMakeSObjForGObj, FTSprites loaders) get
+         * this fixup automatically — only this raw `lbRelocGetFileData`
+         * sprite read needed it.  portFixupSprite is idempotent on
+         * pointer key so the per-frame copy at line 1727+ benefits. */
+        portFixupSprite(sprite);
+        {
+            Bitmap *bms = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+            if (bms != NULL)
+            {
+                portFixupBitmapArray(bms, sprite->nbitmaps);
+                portFixupSpriteBitmapData(sprite, bms);
+            }
+        }
+#endif
+
         sprite->attr = SP_TEXSHUF | SP_TRANSPARENT;
 
     make_gobj:
@@ -2023,14 +2053,29 @@ void sc1PGameBossDefeatInterfaceProcUpdate(void)
     func_800269C0_275C0(nSYAudioVoiceBossDead);
     func_800269C0_275C0(nSYAudioFGMBossDefeatL);
 
+#ifdef PORT
+    /* alSoundEffect.sfx_max ↔ ALWhatever8009EDD0.fgm_ucode_count on N64
+     * by struct overlap; LP64 layouts diverge and the alSoundEffect view
+     * lands on fgm_table_data instead, corrupting it.  See accessors in
+     * src/libultra/n_audio/n_env.c. */
+    extern void portAudioSaveAndBlockFGMs(u16 *out_saved);
+    portAudioSaveAndBlockFGMs(&sSC1PGameBossDefeatSoundTerminateTemp);
+#else
     sSC1PGameBossDefeatSoundTerminateTemp = D_8009EDD0_406D0.sfx_max;
     D_8009EDD0_406D0.sfx_max = 0;
+#endif
 }
 
 // 0x8018F6DC
 void func_ovl65_8018F6DC(void)
 {
+#ifdef PORT
+    /* See portAudioSaveAndBlockFGMs above. */
+    extern void portAudioRestoreFGMs(u16 saved);
+    portAudioRestoreFGMs(sSC1PGameBossDefeatSoundTerminateTemp);
+#else
     D_8009EDD0_406D0.sfx_max = sSC1PGameBossDefeatSoundTerminateTemp;
+#endif
 }
 
 // 0x8018F6F0
