@@ -4,6 +4,9 @@
 #include <sys/scheduler.h>
 #include <missing_libultra.h>
 #include <PR/os.h>
+#include "enhancements/enhancements.h"
+#include "sc/scmanager.h"
+#include "sc/sctypes.h"
 
 #ifndef PORT_HAS_RUMBLE
 #define PORT_HAS_RUMBLE 1
@@ -183,6 +186,42 @@ void syControllerUpdateGlobalData(void)
             gSYControllerDevices[i].button_update = sSYControllerDescs[i].unk08;
             gSYControllerDevices[i].stick_range.x = sSYControllerDescs[i].unk0E;
             gSYControllerDevices[i].stick_range.y = sSYControllerDescs[i].unk0F;
+
+            // NRage-style per-axis stick remap. Runs unconditionally (also in
+            // menus / CSS) because the formula is the user's chosen stick
+            // shaping. No-op when the per-player toggle is off — LUS's stock
+            // octagon-clamped output flows through unchanged in that case.
+            // Must come BEFORE c_stick_smash so the synthetic ±80 values that
+            // c_stick_smash writes into stick_range are not subsequently
+            // re-rescaled by our deadzone/range formula.
+            port_enhancement_analog_remap(i,
+                &gSYControllerDevices[i].stick_range.x,
+                &gSYControllerDevices[i].stick_range.y);
+
+            // Apply input remap enhancements only during gameplay. The
+            // BattleState->players[] array is only valid in VS / 1P scenes;
+            // it's NULL in menus / CSS / opening / staffroll, and we must
+            // not deref it. Bound `i` against GMCOMMON_PLAYERS_MAX explicitly
+            // because the loop limit is `(ARRAY_COUNT(descs)+ARRAY_COUNT(devs))/2`
+            // — equal to GMCOMMON_PLAYERS_MAX today but the math is fragile
+            // and `players[]` overruns would clobber the next BattleState
+            // field on LP64 with the same fingerprint as past per-player-
+            // array bugs (see docs/bugs/per_gkind_table_inishie_short).
+            if (i < GMCOMMON_PLAYERS_MAX
+                && gSCManagerBattleState != NULL
+                && gSCManagerBattleState->players[i].fighter_gobj != NULL) {
+                port_enhancement_c_stick_smash(i,
+                    &gSYControllerDevices[i].button_hold,
+                    &gSYControllerDevices[i].button_tap,
+                    &gSYControllerDevices[i].stick_range.x,
+                    &gSYControllerDevices[i].stick_range.y,
+                    sSYControllerDescs[i].unk04);
+
+                port_enhancement_dpad_jump(i,
+                    &gSYControllerDevices[i].button_hold,
+                    &gSYControllerDevices[i].button_tap,
+                    sSYControllerDescs[i].unk04);
+            }
 
             sSYControllerDescs[i].unk04 = sSYControllerDescs[i].unk08 = sSYControllerDescs[i].unk0C = 0;
         }
