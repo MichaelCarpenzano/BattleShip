@@ -385,6 +385,13 @@ void lbRelocLoadAndRelocFile(u32 file_id, void *ram_dst, u32 bytes_num, s32 loc)
 	// the prior scene's wallpaper. See docs/dk_intro_wallpaper_*.md
 	extern void portTextureCacheDeleteRange(const void *base, size_t size);
 	portTextureCacheDeleteRange(ram_dst, copySize);
+	// Evict cached packed-DL widenings whose source pointer falls in the
+	// range we're about to overwrite. Without this, the widening cache
+	// hands back a vector with stale fileBase/fileSize, segment-0E sub-DL
+	// references resolve to the prior file's address window, and the
+	// interpreter walks garbage — fingerprint of issue #103/#128.
+	extern void portPackedDisplayListCacheDeleteRange(const void *base, size_t size);
+	portPackedDisplayListCacheDeleteRange(ram_dst, copySize);
 	portRelocEvictFileRangesInRange(ram_dst, copySize);
 	memcpy(ram_dst, relocFile->Data.data(), copySize);
 
@@ -887,6 +894,15 @@ void lbRelocInitSetup(LBRelocSetup *setup)
 
 	// Clear u16 struct fixup tracking — addresses from the old heap are stale
 	portResetStructFixups();
+
+	// Clear FB-mirror registrations — see port/bridge/framebuffer_capture.h.
+	// The 1P stage-clear wallpaper buf and the lbtransition photo heap both
+	// register their CPU pointer as a mirror of a snapshot FB; on scene change
+	// the bump-reset heaps free those addresses and a fresh load could land
+	// at the same address. Without this, the new asset would render the prior
+	// scene's snapshot instead of its own pixels.
+	extern void port_capture_release_all(void);
+	port_capture_release_all();
 
 	// ROM addresses (unused in port but stored for completeness)
 	sLBRelocInternBuffer.rom_table_lo = setup->table_addr;

@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.24.0 FATAL_ERROR)
 
 project(ssb64 LANGUAGES C CXX)
 
-# Keep compile_commands.json available for clangd/IDE diagnostics.
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(ExternalProject)
 
 # Pulled-in BEFORE the libultraship subdirectory so its
@@ -33,25 +31,16 @@ option(NON_MATCHING "Build without matching decomp constraints" ON)
 option(NON_EQUIVALENT "Build without equivalent decomp constraints" ON)
 option(USE_AUTO_VCPKG "Use automated vcpkg for dependency management" ON)
 option(SSB64_STAGE_CYCLE_DEMO "Boot directly into attract-demo stage cycle for rendering regression testing" OFF)
-set(SSB64_PLATFORM "LUS" CACHE STRING "Runtime backend: LUS or PSP")
-set_property(CACHE SSB64_PLATFORM PROPERTY STRINGS LUS PSP)
-
-if (NOT SSB64_PLATFORM STREQUAL "LUS" AND NOT SSB64_PLATFORM STREQUAL "PSP")
-    message(FATAL_ERROR "Unsupported SSB64_PLATFORM='${SSB64_PLATFORM}'. Expected one of: LUS, PSP.")
-endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 ################################################################################
 # libultraship configuration (set before add_subdirectory)
-# NOTE: This block is LUS-only and is a primary PSP replacement point.
 ################################################################################
 
-if (SSB64_PLATFORM STREQUAL "LUS")
-    # O2R (ZIP) only, no MPQ/StormLib
-    set(INCLUDE_MPQ_SUPPORT OFF CACHE BOOL "" FORCE)
-    set(GBI_UCODE "F3DEX_GBI_2" CACHE STRING "" FORCE)
-endif()
+# O2R (ZIP) only, no MPQ/StormLib
+set(INCLUDE_MPQ_SUPPORT OFF CACHE BOOL "" FORCE)
+set(GBI_UCODE "F3DEX_GBI_2" CACHE STRING "" FORCE)
 
 # Build Torch as the original standalone sidecar executable.
 set(USE_STANDALONE ON CACHE BOOL "" FORCE)
@@ -67,20 +56,9 @@ set(BUILD_SSB64 ON CACHE BOOL "" FORCE)
 
 ################################################################################
 # Subdirectories: libultraship
-# NOTE: LUS backend dependency wiring; PSP backend intentionally does not use
-# this and should provide replacements in src/platform/psp/.
 ################################################################################
 
-if (SSB64_PLATFORM STREQUAL "LUS")
-    set(SSB64_LUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libultraship")
-    if (NOT EXISTS "${SSB64_LUS_DIR}/CMakeLists.txt")
-        message(FATAL_ERROR
-            "libultraship CMakeLists.txt not found at '${SSB64_LUS_DIR}/CMakeLists.txt'.\n"
-            "Ensure the submodule is initialized in this checkout/worktree."
-        )
-    endif()
-    add_subdirectory("${SSB64_LUS_DIR}" "${CMAKE_BINARY_DIR}/libultraship")
-endif()
+add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
 
 ExternalProject_Add(TorchExternal
     PREFIX TorchExternal
@@ -101,7 +79,14 @@ ExternalProject_Add(TorchExternal
 
 ExternalProject_Get_Property(TorchExternal install_dir)
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/$<CONFIGURATION>/torch.exe)
+    # Torch is built via ExternalProject_Add and inherits the parent generator.
+    # Multi-config generators (Visual Studio) place the binary under <CONFIG>/;
+    # single-config generators (Ninja, NMake) drop it directly in the build dir.
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/$<CONFIG>/torch.exe)
+    else()
+        set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/torch.exe)
+    endif()
     set(TORCH_SIDECAR_NAME torch.exe)
 else()
     set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/torch)
@@ -127,14 +112,14 @@ set(SSB64_RELOC_YAML_FILES
 )
 
 set(SSB64_CREDITS_GENERATED_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/staff.credits.encoded
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/staff.credits.metadata
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/titles.credits.encoded
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/titles.credits.metadata
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/info.credits.encoded
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/info.credits.metadata
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/companies.credits.encoded
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/credits/companies.credits.metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/staff.credits.encoded
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/staff.credits.metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/titles.credits.encoded
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/titles.credits.metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/info.credits.encoded
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/info.credits.metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/companies.credits.encoded
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits/companies.credits.metadata
 )
 
 add_custom_target(RegenerateRelocYamls
@@ -160,7 +145,7 @@ add_custom_target(GenerateCreditsAssets
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/creditsTextConverter.py titles.credits.us.txt
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/creditsTextConverter.py -paragraphFont -multiline info.credits.us.txt
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/creditsTextConverter.py -paragraphFont companies.credits.us.txt
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/credits
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src/credits
     COMMENT "Encoding credits text assets"
 )
 
@@ -178,29 +163,24 @@ add_custom_target(ExtractAssetHeaders
 ################################################################################
 
 # Decomp game code (exclude debug overlay and debug battle/menu)
-file(GLOB_RECURSE SSB64_SRC_CREDITS "src/credits/*.c" "src/credits/*.h")
-file(GLOB_RECURSE SSB64_SRC_EF      "src/ef/*.c"      "src/ef/*.h")
-file(GLOB_RECURSE SSB64_SRC_FT      "src/ft/*.c"      "src/ft/*.h")
-file(GLOB_RECURSE SSB64_SRC_GM      "src/gm/*.c"      "src/gm/*.h")
-file(GLOB_RECURSE SSB64_SRC_GR      "src/gr/*.c"      "src/gr/*.h")
-file(GLOB_RECURSE SSB64_SRC_IF      "src/if/*.c"      "src/if/*.h")
-file(GLOB_RECURSE SSB64_SRC_IT      "src/it/*.c"      "src/it/*.h")
-file(GLOB_RECURSE SSB64_SRC_LB      "src/lb/*.c"      "src/lb/*.h")
-file(GLOB_RECURSE SSB64_SRC_MN      "src/mn/*.c"      "src/mn/*.h")
-file(GLOB_RECURSE SSB64_SRC_MP      "src/mp/*.c"      "src/mp/*.h")
-file(GLOB_RECURSE SSB64_SRC_MV      "src/mv/*.c"      "src/mv/*.h")
-file(GLOB_RECURSE SSB64_SRC_SC      "src/sc/*.c"      "src/sc/*.h")
-file(GLOB_RECURSE SSB64_SRC_SYS     "src/sys/*.c"     "src/sys/*.h")
-file(GLOB_RECURSE SSB64_SRC_WP      "src/wp/*.c"      "src/wp/*.h")
+file(GLOB_RECURSE SSB64_SRC_CREDITS "decomp/src/credits/*.c" "decomp/src/credits/*.h")
+file(GLOB_RECURSE SSB64_SRC_EF      "decomp/src/ef/*.c"      "decomp/src/ef/*.h")
+file(GLOB_RECURSE SSB64_SRC_FT      "decomp/src/ft/*.c"      "decomp/src/ft/*.h")
+file(GLOB_RECURSE SSB64_SRC_GM      "decomp/src/gm/*.c"      "decomp/src/gm/*.h")
+file(GLOB_RECURSE SSB64_SRC_GR      "decomp/src/gr/*.c"      "decomp/src/gr/*.h")
+file(GLOB_RECURSE SSB64_SRC_IF      "decomp/src/if/*.c"      "decomp/src/if/*.h")
+file(GLOB_RECURSE SSB64_SRC_IT      "decomp/src/it/*.c"      "decomp/src/it/*.h")
+file(GLOB_RECURSE SSB64_SRC_LB      "decomp/src/lb/*.c"      "decomp/src/lb/*.h")
+file(GLOB_RECURSE SSB64_SRC_MN      "decomp/src/mn/*.c"      "decomp/src/mn/*.h")
+file(GLOB_RECURSE SSB64_SRC_MP      "decomp/src/mp/*.c"      "decomp/src/mp/*.h")
+file(GLOB_RECURSE SSB64_SRC_MV      "decomp/src/mv/*.c"      "decomp/src/mv/*.h")
+file(GLOB_RECURSE SSB64_SRC_SC      "decomp/src/sc/*.c"      "decomp/src/sc/*.h")
+file(GLOB_RECURSE SSB64_SRC_SYS     "decomp/src/sys/*.c"     "decomp/src/sys/*.h")
+file(GLOB_RECURSE SSB64_SRC_WP      "decomp/src/wp/*.c"      "decomp/src/wp/*.h")
 
 # Port layer (C++ glue) — excludes port/stubs/ which is compiled as part of ssb64_game
 file(GLOB_RECURSE SSB64_SRC_PORT "port/*.cpp" "port/*.c" "port/*.h")
 list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/stubs/")
-
-# PSP backend executable sources (standalone runtime, no libultraship).
-set(SSB64_PSP_RUNTIME_SOURCES
-    src/platform/psp/psp_main.c
-)
 
 # Debug tools (GBI trace + Acmd trace systems)
 file(GLOB SSB64_DEBUG_TOOLS
@@ -263,19 +243,6 @@ set(SSB64_COMPILE_DEFS
     CIMGUI_DEFINE_ENUMS_AND_STRUCTS
 )
 
-if (SSB64_PLATFORM STREQUAL "PSP")
-    list(APPEND SSB64_COMPILE_DEFS
-        PLATFORM_PSP=1
-        PORT_HAS_RUMBLE=0
-        PORT_HAS_ANALOG_STICK=1
-    )
-else()
-    list(APPEND SSB64_COMPILE_DEFS
-        PORT_HAS_RUMBLE=1
-        PORT_HAS_ANALOG_STICK=1
-    )
-endif()
-
 if(SSB64_STAGE_CYCLE_DEMO)
     list(APPEND SSB64_COMPILE_DEFS PORT_STAGE_CYCLE_DEMO=1)
 endif()
@@ -287,22 +254,16 @@ endif()
 add_library(ssb64_game OBJECT ${SSB64_DECOMP_SOURCES})
 
 # Port stub definitions (C code that satisfies N64 linker symbols)
-# Runtime-specific stubs (backend-specific compilation units).
-if (SSB64_PLATFORM STREQUAL "LUS")
-    file(GLOB SSB64_RUNTIME_STUBS "port/stubs/*.c")
-elseif (SSB64_PLATFORM STREQUAL "PSP")
-    file(GLOB SSB64_RUNTIME_STUBS "src/platform/psp/*.c")
-    list(FILTER SSB64_RUNTIME_STUBS EXCLUDE REGEX "src/platform/psp/psp_main\\.c$")
-endif()
-target_sources(ssb64_game PRIVATE ${SSB64_RUNTIME_STUBS})
+file(GLOB SSB64_STUBS "port/stubs/*.c")
+target_sources(ssb64_game PRIVATE ${SSB64_STUBS})
 
 # Selectively include decomp libultra files that provide needed functionality.
 # These are pure C implementations that work on any platform.
 set(SSB64_LIBULTRA_PORT
-    src/libultra/gu/mtxcatf.c       # guMtxCatF
-    src/libultra/gu/mtxutil.c        # guMtxF2L, guMtxL2F, guMtxIdentF
-    src/libultra/gu/mtxxfmf.c        # guMtxXFMF
-    src/libultra/gu/normalize.c      # guNormalize
+    decomp/src/libultra/gu/mtxcatf.c       # guMtxCatF
+    decomp/src/libultra/gu/mtxutil.c        # guMtxF2L, guMtxL2F, guMtxIdentF
+    decomp/src/libultra/gu/mtxxfmf.c        # guMtxXFMF
+    decomp/src/libultra/gu/normalize.c      # guNormalize
     # NOTE: sprite.c is NOT included — drawbitmap is assembly-only (MIPS).
     # Sprite functions are stubbed in port/stubs/n64_stubs.c instead.
 )
@@ -312,47 +273,43 @@ target_sources(ssb64_game PRIVATE ${SSB64_LIBULTRA_PORT})
 # These decomp files are compiled with PORT defines; the CPU Acmd interpreter
 # (port/audio/mixer.h) replaces RSP microcode via macro substitution.
 set(SSB64_NAUDIO_PORT
-    src/libultra/n_audio/n_env.c             # Core: synth driver, audio frame, pull chain, CSP, FX, event queue
-    src/libultra/n_audio/n_synaddplayer.c     # Add player to synth driver
-    src/libultra/n_audio/n_synallocfx.c       # FX bus allocation
-    src/libultra/n_audio/n_synallocvoice.c    # Voice allocation + stealing
-    src/libultra/n_audio/n_synfreevoice.c     # Voice free
-    src/libultra/n_audio/n_syndelete.c        # Synth delete
-    src/libultra/n_audio/n_synsetfxmix.c      # Voice FX mix
-    src/libultra/n_audio/n_synsetpan.c        # Voice pan
-    src/libultra/n_audio/n_synsetpitch.c      # Voice pitch
-    src/libultra/n_audio/n_synsetpriority.c   # Voice priority
-    src/libultra/n_audio/n_synsetvol.c        # Voice volume
-    src/libultra/n_audio/n_synstartvoiceparam.c # Voice start with params
-    src/libultra/n_audio/n_synstopvoice.c     # Voice stop
-    src/libultra/n_audio/n_cspplay.c          # CSP play
-    src/libultra/n_audio/n_cspsetbank.c       # CSP set bank
-    src/libultra/n_audio/n_cspsetfxmix.c      # CSP set FX mix
-    src/libultra/n_audio/n_cspsetpriority.c   # CSP set priority
-    src/libultra/n_audio/n_cspsetseq.c        # CSP set sequence
-    src/libultra/n_audio/n_cspsetvol.c        # CSP set volume
-    src/libultra/n_audio/n_cspstop.c          # CSP stop
-    src/libultra/n_audio/n_seq.c              # Sequence data reader
-    src/libultra/n_audio/n_seqplayer.c        # Sequence player voice handler
-    src/libultra/n_audio/n_seqpgetchlvol.c    # Get channel volume
-    src/libultra/n_audio/n_seqpgetvol.c       # Get master volume
-    src/libultra/audio/cents2ratio.c          # alCents2Ratio — pitch conversion
+    decomp/src/libultra/n_audio/n_env.c             # Core: synth driver, audio frame, pull chain, CSP, FX, event queue
+    decomp/src/libultra/n_audio/n_synaddplayer.c     # Add player to synth driver
+    decomp/src/libultra/n_audio/n_synallocfx.c       # FX bus allocation
+    decomp/src/libultra/n_audio/n_synallocvoice.c    # Voice allocation + stealing
+    decomp/src/libultra/n_audio/n_synfreevoice.c     # Voice free
+    decomp/src/libultra/n_audio/n_syndelete.c        # Synth delete
+    decomp/src/libultra/n_audio/n_synsetfxmix.c      # Voice FX mix
+    decomp/src/libultra/n_audio/n_synsetpan.c        # Voice pan
+    decomp/src/libultra/n_audio/n_synsetpitch.c      # Voice pitch
+    decomp/src/libultra/n_audio/n_synsetpriority.c   # Voice priority
+    decomp/src/libultra/n_audio/n_synsetvol.c        # Voice volume
+    decomp/src/libultra/n_audio/n_synstartvoiceparam.c # Voice start with params
+    decomp/src/libultra/n_audio/n_synstopvoice.c     # Voice stop
+    decomp/src/libultra/n_audio/n_cspplay.c          # CSP play
+    decomp/src/libultra/n_audio/n_cspsetbank.c       # CSP set bank
+    decomp/src/libultra/n_audio/n_cspsetfxmix.c      # CSP set FX mix
+    decomp/src/libultra/n_audio/n_cspsetpriority.c   # CSP set priority
+    decomp/src/libultra/n_audio/n_cspsetseq.c        # CSP set sequence
+    decomp/src/libultra/n_audio/n_cspsetvol.c        # CSP set volume
+    decomp/src/libultra/n_audio/n_cspstop.c          # CSP stop
+    decomp/src/libultra/n_audio/n_seq.c              # Sequence data reader
+    decomp/src/libultra/n_audio/n_seqplayer.c        # Sequence player voice handler
+    decomp/src/libultra/n_audio/n_seqpgetchlvol.c    # Get channel volume
+    decomp/src/libultra/n_audio/n_seqpgetvol.c       # Get master volume
+    decomp/src/libultra/audio/cents2ratio.c          # alCents2Ratio — pitch conversion
 )
 target_sources(ssb64_game PRIVATE ${SSB64_NAUDIO_PORT})
 
 target_compile_definitions(ssb64_game PRIVATE ${SSB64_COMPILE_DEFS})
 
 target_include_directories(ssb64_game PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include    # Custom C headers (shadows system headers)
-    ${CMAKE_CURRENT_SOURCE_DIR}/src        # Game headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/port       # Port headers (coroutine.h, etc.)
-    ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools # Acmd trace (mixer.h calls acmd_trace_log_cmd)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include          # Port-tree generated headers (reloc_data.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/include   # Decomp C headers (shadows system headers)
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src       # Decomp game module headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/port             # Port headers (coroutine.h, etc.)
+    ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools      # Acmd trace (mixer.h calls acmd_trace_log_cmd)
 )
-
-if (SSB64_PLATFORM STREQUAL "PSP")
-    find_package(PSPSDK REQUIRED)
-    target_include_directories(ssb64_game PRIVATE ${PSPSDK_INCLUDE_DIRS})
-endif()
 
 # Clang 16+ promoted several historically-warning diagnostics to errors by
 # default, which breaks the decomp C code on macOS/Linux. The decomp was
@@ -394,23 +351,7 @@ endif()
 # Executable target — port C++ code + decomp object library
 ################################################################################
 
-if (SSB64_PLATFORM STREQUAL "LUS")
-    set(SSB64_EXECUTABLE_SOURCES ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS})
-elseif (SSB64_PLATFORM STREQUAL "PSP")
-    set(SSB64_EXECUTABLE_SOURCES ${SSB64_PSP_RUNTIME_SOURCES})
-else()
-    message(FATAL_ERROR "Unsupported SSB64_PLATFORM='${SSB64_PLATFORM}'.")
-endif()
-
-if (SSB64_PLATFORM STREQUAL "PSP")
-    # Phase 1 bootstrap: produce a PSP-linking executable without pulling the
-    # full game object graph yet. The decomp object library still builds as a
-    # separate target for compile validation.
-    add_executable(${PROJECT_NAME} ${SSB64_EXECUTABLE_SOURCES})
-    add_dependencies(${PROJECT_NAME} ssb64_game)
-else()
-    add_executable(${PROJECT_NAME} ${SSB64_EXECUTABLE_SOURCES} $<TARGET_OBJECTS:ssb64_game>)
-endif()
+add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
 
 # User-facing binary name. The CMake target keeps the historical
 # `ssb64` identifier (matches the repo, build dirs, internal symbols),
@@ -426,17 +367,6 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     )
 endif()
 
-if (SSB64_PLATFORM STREQUAL "PSP")
-    if (NOT CMAKE_C_COMPILER MATCHES "psp-gcc")
-        message(FATAL_ERROR
-            "SSB64_PLATFORM=PSP requires the PSPSDK cross toolchain.\n"
-            "Reconfigure with:\n"
-            "  -DCMAKE_TOOLCHAIN_FILE=$ENV{PSPDEV}/psp/share/pspdev.cmake\n"
-            "and ensure PSPDEV + PATH include the pspdev toolchain bin directory."
-        )
-    endif()
-endif()
-
 ################################################################################
 # Compile definitions
 ################################################################################
@@ -448,61 +378,21 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE ${SSB64_COMPILE_DEFS})
 ################################################################################
 
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    # NOTE: Do NOT add decomp/include here. The C decomp shim headers (stdlib.h,
+    # stddef.h, ...) shadow the C++ standard library when picked up by port/*.cpp,
+    # producing libc++ <cstdlib> errors. Only ssb64_game (C decomp) consumes them.
+    ${CMAKE_CURRENT_SOURCE_DIR}/decomp/src       # Decomp game module headers (sys/, ft/, sc/, ...)
+    ${CMAKE_CURRENT_SOURCE_DIR}/port
+    ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
 )
 
-if (SSB64_PLATFORM STREQUAL "LUS")
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/port
-        ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
-    )
-elseif (SSB64_PLATFORM STREQUAL "PSP")
-    target_include_directories(${PROJECT_NAME} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/psp
-    )
-endif()
-
 ################################################################################
-# Runtime backend linking and dependencies
-# NOTE: The LUS path below is intentionally isolated to mark PSP replacement
-# points while preserving existing shared game logic source lists.
+# Link libultraship and Torch
 ################################################################################
 
-if (SSB64_PLATFORM STREQUAL "LUS")
-    add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
-    add_dependencies(ssb64_game GenerateCreditsAssets)
-    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
-elseif (SSB64_PLATFORM STREQUAL "PSP")
-    find_package(PSPSDK REQUIRED)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${PSPSDK_INCLUDE_DIRS})
-    target_link_directories(${PROJECT_NAME} PRIVATE ${PSPSDK_LIBRARY_DIRS})
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        pspdebug
-        pspdisplay
-        pspge
-        pspgum
-        pspgu
-        pspctrl
-        pspaudiolib
-        pspaudio
-        pspvfpu
-        m
-    )
-
-    # Optional PSP packaging helper (if provided by the PSP toolchain module).
-    if (COMMAND create_pbp_file)
-        set(PSP_DEPLOY_DIR ${CMAKE_BINARY_DIR}/psp-deploy)
-        file(MAKE_DIRECTORY ${PSP_DEPLOY_DIR})
-        create_pbp_file(
-            TARGET ${PROJECT_NAME}
-            TITLE "BattleShip"
-            PBP_OUTPUT ${PSP_DEPLOY_DIR}/EBOOT.PBP
-        )
-    endif()
-else()
-    message(FATAL_ERROR "Unsupported backend combination for SSB64_PLATFORM='${SSB64_PLATFORM}'.")
-endif()
+add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
+add_dependencies(ssb64_game GenerateCreditsAssets)
+target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
 
 ################################################################################
 # Platform-specific settings
@@ -583,15 +473,47 @@ if(NOT SSB64_BASEROM)
     set(SSB64_BASEROM "${CMAKE_SOURCE_DIR}/baserom.us.z64")
 endif()
 
-add_custom_target(ExtractAssets
-    DEPENDS TorchExternal PrepareBuildInputs GenerateF3DO2R
-    COMMAND ${TORCH_EXECUTABLE} o2r ${SSB64_BASEROM} -s ${CMAKE_SOURCE_DIR} -d ${CMAKE_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/BattleShip.o2r
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/BattleShip.o2r
-    COMMENT "Extracting assets from ${SSB64_BASEROM} into O2R archive"
-)
+# Two configurations:
+#
+#   (a) Baserom present (typical dev / Torch-extract first-run): declare the
+#       o2r as an add_custom_command(OUTPUT ...) so downstream rules that
+#       DEPENDS on it as a file (notably Battle-ShipYard's passthrough_reloc
+#       commands) connect to this producer through CMake's file-level
+#       dependency graph. The wrapping custom_target keeps
+#       `cmake --build . --target ExtractAssets` working.
+#
+#   (b) Baserom absent (CI release pipeline never ships the copyrighted ROM):
+#       provide a stub ExtractAssets target that fails with a clear error if
+#       invoked, but does NOT register the file-level rule. Without the rule
+#       Ninja correctly skips the source-compile pipeline (which transitively
+#       depends on the o2r) instead of erroring with "no rule to make target".
+#       Any caller that genuinely needs the o2r will hit ExtractAssets and
+#       get the explanatory error.
+#
+# `finalize_battleship_from_source` below additionally gates on the baserom,
+# so case (b) doesn't even register the source-compile target.
+if(EXISTS "${SSB64_BASEROM}")
+    add_custom_command(
+        OUTPUT ${CMAKE_SOURCE_DIR}/BattleShip.o2r
+        DEPENDS TorchExternal PrepareBuildInputs GenerateF3DO2R ${SSB64_BASEROM}
+        COMMAND ${TORCH_EXECUTABLE} o2r ${SSB64_BASEROM} -s ${CMAKE_SOURCE_DIR} -d ${CMAKE_SOURCE_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/BattleShip.o2r
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/BattleShip.o2r
+        COMMENT "Extracting assets from ${SSB64_BASEROM} into O2R archive"
+    )
+    add_custom_target(ExtractAssets DEPENDS ${CMAKE_SOURCE_DIR}/BattleShip.o2r)
+else()
+    add_custom_target(ExtractAssets
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "ERROR: ExtractAssets requires baserom.us.{z64,n64,v64} in source root (${CMAKE_SOURCE_DIR})"
+        COMMAND ${CMAKE_COMMAND} -E false
+        COMMENT "ExtractAssets stub — baserom missing"
+    )
+    message(STATUS "BattleShip.o2r: baserom absent — ExtractAssets stub installed; "
+                   "source-compile pipeline will be disabled (released artifacts ship without .fromsource.o2r)")
+endif()
 
 add_custom_target(GenerateBattleShipO2R
     DEPENDS ExtractAssets
@@ -603,3 +525,38 @@ add_custom_target(GeneratePortO2R
     COMMAND ${TORCH_EXECUTABLE} pack ${CMAKE_SOURCE_DIR}/assets ${CMAKE_SOURCE_DIR}/ssb64.o2r o2r
     COMMENT "Packing port-specific assets into ssb64.o2r"
 )
+
+################################################################################
+# RelocData compile-from-source pipeline (Battle-ShipYard modkit)
+#
+# When a compatible toolchain is available (LLVM/clang or VS x86 cl.exe via
+# vcvars32), builds BattleShip.fromsource.o2r alongside the executable.
+# Loaded ahead of BattleShip.o2r at runtime when SSB64_RELOC_FROMSOURCE=1,
+# shadowing Torch entries for matching paths. With no toolchain the entire
+# subsystem is skipped — runtime falls back to Torch-extracted reloc data
+# exactly as before.
+#
+# The pipeline lives in the Battle-ShipYard submodule
+# (https://github.com/JRickey/Battle-ShipYard). Bumping the submodule
+# pointer is how we ship modkit changes; nothing in this repo's CMakeLists
+# needs to change for routine modkit updates. The contract is the variables
+# set below — DECOMP_DIR for the source tree, RELOC_TABLE for the file_id
+# mapping. Compiler discovery, eligible-set generation, per-file build
+# rules, and finalize_battleship_from_source all live in the submodule.
+################################################################################
+
+set(RELOCDATA_DECOMP_DIR  "${CMAKE_SOURCE_DIR}/decomp")
+set(RELOCDATA_RELOC_TABLE "${CMAKE_SOURCE_DIR}/port/resource/RelocFileTable.cpp")
+# ExtractAssets writes BattleShip.o2r to ${CMAKE_SOURCE_DIR}; tell the modkit
+# to make BuildBattleShipFromSource depend on it so the source-compile +
+# passthrough commands don't race on a fresh `cmake -B && cmake --build` flow
+# (the failure mode that broke v0.7.6-beta packaging).
+set(RELOCDATA_BATTLESHIP_O2R_TARGET ExtractAssets)
+include(Battle-ShipYard/cmake/RelocData.cmake)
+
+if(RELOCDATA_CC AND EXISTS "${SSB64_BASEROM}")
+    finalize_battleship_from_source(${CMAKE_BINARY_DIR}/BattleShip.fromsource.o2r)
+elseif(RELOCDATA_CC)
+    message(STATUS "RelocData: baserom absent — BuildBattleShipFromSource skipped "
+                   "(release CI / no-rom builds; runtime falls back to Torch-passthrough reloc data)")
+endif()
